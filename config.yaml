@@ -1,0 +1,24 @@
+gage_number: "03020500"
+site_name: "OilCreek"
+
+base_folder: "C:/Users/WeisA/Documents/Oil_Creek/USGS"
+project_folder: "${base_folder}/${gage_number}_${site_name}"
+
+data_paths:
+  daily_streamflow: "${project_folder}/Daily"
+  inst_streamflow: "${project_folder}/Inst"
+  daily_gageheight: "${project_folder}/Daily_GageHeight"
+  inst_gageheight: "${project_folder}/Inst_GageHeight"
+
+available_dates:
+  daily_streamflow: ["1932-10-01", "2025-02-24"]
+  inst_streamflow: ["1986-10-01", "2025-02-21"]
+  daily_gageheight: ["1932-10-01", "2025-02-24"]
+  inst_gageheight: ["1986-10-01", "2025-02-21"]
+
+breakup_dates_file: "${project_folder}/BreakupEvents/Event_Dates.txt"
+
+output_paths:
+  plots: "${project_folder}/Plots"
+  stats: "${project_folder}/Stats"
+  processed_data: "${project_folder}/ProcessedData"
