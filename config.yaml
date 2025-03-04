@@ -5,16 +5,15 @@ base_folder: "C:/Users/WeisA/Documents/Oil_Creek/USGS"
 project_folder: "${base_folder}/${gage_number}_${site_name}"
 
 data_paths:
-  daily_streamflow: "${project_folder}/Daily"
-  inst_streamflow: "${project_folder}/Inst"
-  daily_gageheight: "${project_folder}/Daily_GageHeight"
-  inst_gageheight: "${project_folder}/Inst_GageHeight"
+  daily_streamflow: "${project_folder}/Daily/Qw"
+  inst_streamflow: "${project_folder}/Inst/Qw"
+  daily_gageheight: "${project_folder}/Daily/Hw"
+  inst_gageheight: "${project_folder}/Inst/Hw"
 
 available_dates:
-  daily_streamflow: ["1932-10-01", "2025-02-24"]
-  inst_streamflow: ["1986-10-01", "2025-02-21"]
-  daily_gageheight: ["1932-10-01", "2025-02-24"]
-  inst_gageheight: ["1986-10-01", "2025-02-21"]
+  daily_streamflow: ["1932-10-01", "2025-02-28"]
+  inst_streamflow: ["1986-10-01", "2025-02-28"]
+  inst_gageheight: ["2007-10-01", "2025-02-28"]
 
 breakup_dates_file: "${project_folder}/BreakupEvents/Event_Dates.txt"
 
@@ -22,3 +21,31 @@ output_paths:
   plots: "${project_folder}/Plots"
   stats: "${project_folder}/Stats"
   processed_data: "${project_folder}/ProcessedData"
+
+plot_settings:
+  font: Arial
+  fontsize: 12
+  title_fontsize: 14
+  dpi: 600
+  figure_size:
+    width: 12
+    height: 6
+  colors:
+    daily: black
+    inst: red
+    gage_height: blue
+    event_palette: 
+      - '#1f77b4'  # Blue
+      - '#ff7f0e'  # Orange
+      - '#2ca02c'  # Green
+      - '#d62728'  # Red
+      - '#9467bd'  # Purple
+      - '#8c564b'  # Brown
+      - '#e377c2'  # Pink
+      - '#7f7f7f'  # Gray
+      - '#bcbd22'  # Olive
+      - '#17becf'  # Teal
+  linestyle:
+    daily: "--"
+    inst: "-"
+    gage_height: "-"
