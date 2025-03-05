@@ -8,8 +8,8 @@ import logging
 # Load config
 CONFIG_PATH = r"C:\Users\WeisA\Documents\Oil_Creek\USGS\03020500_OilCreek\03020500_IceBreakup_Toolkit\config.yaml"
 
-with open(CONFIG_PATH, 'r') as file:
-    config = yaml.safe_load(file)
+with open(CONFIG_PATH, 'r') as config_file:
+    config = yaml.safe_load(config_file)
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -52,44 +52,57 @@ def process_and_plot_all():
     inst_hw_folder = os.path.join(winter_splits_folder, 'Inst', 'Hw')
     daily_qw_folder = os.path.join(winter_splits_folder, 'Daily', 'Qw')
 
-    winters = set(file.replace(f'{gage_number}_WinterDaily_Qw_', '').replace('.csv', '')
-                  for file in os.listdir(daily_qw_folder) if file.endswith('.csv'))
+    winters_daily = {file.replace(f'{gage_number}_WinterDaily_Qw_', '').replace('.csv', '')
+                     for file in os.listdir(daily_qw_folder) if file.endswith('.csv')}
+    winters_inst_qw = {file.replace(f'{gage_number}_WinterInst_Qw_', '').replace('.csv', '')
+                       for file in os.listdir(inst_qw_folder) if file.endswith('.csv')}
+    winters_inst_hw = {file.replace(f'{gage_number}_WinterInst_Hw_', '').replace('.csv', '')
+                       for file in os.listdir(inst_hw_folder) if file.endswith('.csv')}
 
-    logging.info(f"Detected winters from files: {sorted(winters)}")
+    all_winters = winters_daily | winters_inst_qw | winters_inst_hw
 
-    for winter in sorted(winters):
+    logging.info(f"Detected winters from files: {sorted(all_winters)}")
+
+    for winter in sorted(all_winters):
         logging.info(f"Processing winter: {winter}")
+
+        daily_data = pd.DataFrame()
+        inst_qw_data = pd.DataFrame()
+        inst_hw_data = pd.DataFrame()
 
         daily_file = os.path.join(daily_qw_folder, f"{gage_number}_WinterDaily_Qw_{winter}.csv")
         inst_qw_file = os.path.join(inst_qw_folder, f"{gage_number}_WinterInst_Qw_{winter}.csv")
         inst_hw_file = os.path.join(inst_hw_folder, f"{gage_number}_WinterInst_Hw_{winter}.csv")
 
-        daily_data = pd.read_csv(daily_file)
-        if 'Date' not in daily_data.columns or 'Discharge (cfs)' not in daily_data.columns:
-            logging.warning(f"Unexpected columns in {daily_file}, skipping.")
-            continue
-        daily_data['Date'] = pd.to_datetime(daily_data['Date'])
-        daily_data = align_daily_to_noon(daily_data)
+        if os.path.exists(daily_file):
+            daily_data = pd.read_csv(daily_file)
+            if {'Date', 'Discharge (cfs)'}.issubset(daily_data.columns):
+                daily_data['Date'] = pd.to_datetime(daily_data['Date'])
+                daily_data['Discharge (cfs)'] = pd.to_numeric(daily_data['Discharge (cfs)'], errors='coerce')
+                daily_data = align_daily_to_noon(daily_data)
+                logging.info(f"Loaded daily discharge data for {winter} - dtype: {daily_data['Discharge (cfs)'].dtype}")
+            else:
+                logging.warning(f"Unexpected columns in {daily_file}, skipping daily data.")
+                daily_data = pd.DataFrame()
 
-        inst_qw_data = pd.DataFrame()
         if os.path.exists(inst_qw_file):
             inst_qw_data = pd.read_csv(inst_qw_file)
-            if 'Date & Time' not in inst_qw_data.columns or 'Discharge (cfs)' not in inst_qw_data.columns:
-                logging.warning(f"Unexpected columns in {inst_qw_file}, skipping.")
-                inst_qw_data = pd.DataFrame()
-            else:
+            if {'Date & Time', 'Discharge (cfs)'}.issubset(inst_qw_data.columns):
                 inst_qw_data['Date & Time'] = pd.to_datetime(inst_qw_data['Date & Time'])
+                inst_qw_data['Discharge (cfs)'] = pd.to_numeric(inst_qw_data['Discharge (cfs)'], errors='coerce')
                 inst_qw_data = insert_gaps(inst_qw_data, 'Date & Time', 'Discharge (cfs)')
+            else:
+                logging.warning(f"Unexpected columns in {inst_qw_file}, skipping instantaneous discharge.")
+                inst_qw_data = pd.DataFrame()
 
-        inst_hw_data = pd.DataFrame()
         if os.path.exists(inst_hw_file):
             inst_hw_data = pd.read_csv(inst_hw_file)
-            if 'Date & Time' not in inst_hw_data.columns or 'Gage Height (ft)' not in inst_hw_data.columns:
-                logging.warning(f"Unexpected columns in {inst_hw_file}, skipping.")
-                inst_hw_data = pd.DataFrame()
-            else:
+            if {'Date & Time', 'Gage Height (ft)'}.issubset(inst_hw_data.columns):
                 inst_hw_data['Date & Time'] = pd.to_datetime(inst_hw_data['Date & Time'])
                 inst_hw_data = insert_gaps(inst_hw_data, 'Date & Time', 'Gage Height (ft)')
+            else:
+                logging.warning(f"Unexpected columns in {inst_hw_file}, skipping instantaneous gage height.")
+                inst_hw_data = pd.DataFrame()
 
         plot_combined_winter(winter, daily_data, inst_qw_data, inst_hw_data)
         logging.info(f"Finished plots for winter: {winter}")
@@ -107,13 +120,13 @@ def plot_combined_winter(winter, daily_data, inst_qw_data, inst_hw_data):
 
     ax1.set_ylabel("Discharge (ft³/s)", fontsize=12, fontweight='bold')
 
-    valid_daily = daily_data['Discharge (cfs)'].dropna()
-    valid_inst_qw = inst_qw_data['Discharge (cfs)'].dropna()
+    max_y = 0
+    if 'Discharge (cfs)' in daily_data.columns:
+        max_y = max(max_y, daily_data['Discharge (cfs)'].max(skipna=True))
+    if 'Discharge (cfs)' in inst_qw_data.columns:
+        max_y = max(max_y, inst_qw_data['Discharge (cfs)'].max(skipna=True))
 
-    if not valid_daily.empty or not valid_inst_qw.empty:
-        max_y = max(valid_daily.max() if not valid_daily.empty else 0,
-                    valid_inst_qw.max() if not valid_inst_qw.empty else 0)
-        ax1.set_ylim(bottom=0, top=max_y * 1.1)
+    ax1.set_ylim(bottom=0, top=max_y * 1.1 if max_y > 0 else 1)
 
     ax2 = ax1.twinx() if not inst_hw_data.empty else None
     if not inst_hw_data.empty:
@@ -121,24 +134,13 @@ def plot_combined_winter(winter, daily_data, inst_qw_data, inst_hw_data):
         ax2.set_ylabel("Gage Height (ft)", fontsize=12, fontweight='bold')
 
     ax1.set_xlabel("Date", fontsize=12, fontweight='bold')
-
     start_date = pd.Timestamp(f"{winter[:4]}-11-01")
     end_date = pd.Timestamp(f"{winter[5:]}-03-31")
     ax1.set_xlim(start_date, end_date)
 
     ax1.set_title(f"{gage_number} {site_name} - Winter {winter}", fontsize=14, fontweight='bold')
 
-    ax1.grid(False)
-
-    handles1, labels1 = ax1.get_legend_handles_labels()
-    if ax2:
-        handles2, labels2 = ax2.get_legend_handles_labels()
-        ax1.legend(handles1 + handles2, labels1 + labels2, loc='upper right')
-    else:
-        ax1.legend(loc='upper right')
-
     plt.tight_layout()
-
     output_path = os.path.join(winter_plots_folder, f"Winter_{winter}_CombinedPlot.tif")
     plt.savefig(output_path, dpi=300)
     plt.close()

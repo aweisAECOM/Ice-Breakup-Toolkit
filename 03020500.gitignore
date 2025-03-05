@@ -1,0 +1,13 @@
+# PyCharm and Python Stuff
+.idea/
+__pycache__/
+*.pyc
+
+# Data Files
+*.csv
+*.xlsx
+*.tif
+*.png
+
+# Other
+.DS_Store
