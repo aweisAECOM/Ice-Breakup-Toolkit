@@ -29,18 +29,19 @@ os.makedirs(plots_folder, exist_ok=True)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def load_and_clean_data(filepath, is_daily):
-    """ Load data and clean -999999 ice/missing values. """
-    if is_daily:
-        df = pd.read_csv(filepath, dtype={'Discharge (cfs)': 'str'})
-        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-        df['Discharge (cfs)'] = pd.to_numeric(df['Discharge (cfs)'], errors='coerce')
-    else:
-        df = pd.read_csv(filepath, dtype={'Discharge (cfs)': 'str'})
-        df['Date & Time'] = pd.to_datetime(df['Date & Time'], errors='coerce')
-        df['Date'] = df['Date & Time'].dt.strftime('%m-%d')
-        df['Discharge (cfs)'] = pd.to_numeric(df['Discharge (cfs)'], errors='coerce')
+    """ Load data and clean -999999 and 'Ice' values. """
+    dtype_mapping = {'Discharge (cfs)': 'str'}  # Read discharge as string to handle non-numeric values
+    date_column = 'Date' if is_daily else 'Date & Time'
 
-    # Replace -999999 with NaN to exclude from statistics
+    df = pd.read_csv(filepath, dtype=dtype_mapping, parse_dates=[date_column])
+
+    if not is_daily:
+        df['Date'] = df['Date & Time'].dt.strftime('%m-%d')
+
+    # Convert discharge to numeric, coercing errors (turning 'Ice' to NaN)
+    df['Discharge (cfs)'] = pd.to_numeric(df['Discharge (cfs)'], errors='coerce')
+
+    # Replace -999999 with NaN
     df['Discharge (cfs)'] = df['Discharge (cfs)'].replace(-999999, np.nan)
 
     return df
@@ -63,15 +64,14 @@ def calculate_daily_statistics(df):
     return stats
 
 def save_statistics(stats_df, filepath):
-    """ Save statistics to CSV. """
-    stats_df.to_csv(filepath, index=False)
+    """ Save statistics to CSV with improved formatting. """
+    stats_df.to_csv(filepath, index=False, float_format='%.3f')
     logging.info(f"Saved statistics to {filepath}")
 
 def plot_statistics(stats_df, output_folder, title, prefix):
     """ Plot statistics as both normal and log plots, with shaded percentiles. """
 
-    # Convert 'Date' back into a dummy year for consistent x-axis
-    dates = pd.to_datetime('2000-' + stats_df['Date'])
+    dates = pd.to_datetime('2000-' + stats_df['Date'], format='%Y-%m-%d')
 
     def plot_with_style(ax, log_scale=False):
         ax.fill_between(dates, stats_df['Min'], stats_df['P5'], color='blue', alpha=0.2)
@@ -101,38 +101,26 @@ def plot_statistics(stats_df, output_folder, title, prefix):
 
         ax.legend()
 
-    # Normal Scale
     fig, ax = plt.subplots(figsize=(10, 5))
     plot_with_style(ax, log_scale=False)
-    normal_plot_path = os.path.join(output_folder, f'{prefix}_Stats_Normal.tif')
     plt.tight_layout()
-    plt.savefig(normal_plot_path, dpi=600)
+    plt.savefig(os.path.join(output_folder, f'{prefix}_Stats_Normal.tif'), dpi=600)
     plt.close()
-    logging.info(f"Saved normal plot to {normal_plot_path}")
 
-    # Log Scale
     fig, ax = plt.subplots(figsize=(10, 5))
     plot_with_style(ax, log_scale=True)
-    log_plot_path = os.path.join(output_folder, f'{prefix}_Stats_Log.tif')
     plt.tight_layout()
-    plt.savefig(log_plot_path, dpi=600)
+    plt.savefig(os.path.join(output_folder, f'{prefix}_Stats_Log.tif'), dpi=600)
     plt.close()
-    logging.info(f"Saved log plot to {log_plot_path}")
 
 def process_and_plot(filepath, is_daily, title, prefix):
-    """ Combined workflow for loading, calculating, saving, and plotting statistics. """
     df = load_and_clean_data(filepath, is_daily)
 
     if is_daily:
         df['Date'] = df['Date'].dt.strftime('%m-%d')
-    else:
-        df['Date'] = df['Date']
 
     stats_df = calculate_daily_statistics(df)
-
-    stats_output_path = os.path.join(stats_folder, f'{prefix}_Stats.csv')
-    save_statistics(stats_df, stats_output_path)
-
+    save_statistics(stats_df, os.path.join(stats_folder, f'{prefix}_Stats.csv'))
     plot_statistics(stats_df, plots_folder, title, prefix)
 
 def main():
