@@ -6,7 +6,7 @@ import logging
 import matplotlib.pyplot as plt
 
 # Load config
-CONFIG_PATH = r"C:\Users\WeisA\Documents\Oil_Creek\USGS\03020500_OilCreek\03020500_IceBreakup_Tookit\config.yaml"
+CONFIG_PATH = r"C:\Users\WeisA\Documents\Oil_Creek\USGS\03020500_OilCreek\03020500_IceBreakup_Toolkit\config.yaml"
 
 with open(CONFIG_PATH, 'r') as file:
     config = yaml.safe_load(file)
@@ -30,12 +30,12 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 def load_and_clean_data(filepath, is_daily):
     """ Load data and clean -999999 ice/missing values. """
-    df = pd.read_csv(filepath)
-
     if is_daily:
+        df = pd.read_csv(filepath, dtype={'Discharge (cfs)': 'str'})
         df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
         df['Discharge (cfs)'] = pd.to_numeric(df['Discharge (cfs)'], errors='coerce')
     else:
+        df = pd.read_csv(filepath, dtype={'Discharge (cfs)': 'str'})
         df['Date & Time'] = pd.to_datetime(df['Date & Time'], errors='coerce')
         df['Date'] = df['Date & Time'].dt.strftime('%m-%d')
         df['Discharge (cfs)'] = pd.to_numeric(df['Discharge (cfs)'], errors='coerce')
@@ -138,12 +138,10 @@ def process_and_plot(filepath, is_daily, title, prefix):
 def main():
     logging.info("Starting statistical analysis and plotting for Instantaneous and Daily Streamflow (Qw)")
 
-    # Process Instantaneous Qw
     process_and_plot(inst_qw_path, is_daily=False,
                      title=f'{gage_number} Historical Instantaneous Streamflow Statistics',
                      prefix=f'{gage_number}_InstQw')
 
-    # Process Daily Qw
     process_and_plot(daily_qw_path, is_daily=True,
                      title=f'{gage_number} Historical Daily Streamflow Statistics',
                      prefix=f'{gage_number}_DailyQw')

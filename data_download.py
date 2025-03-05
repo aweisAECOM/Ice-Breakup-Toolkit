@@ -5,7 +5,7 @@ import pandas as pd
 import logging
 
 # Load config
-CONFIG_PATH = r"C:\Users\WeisA\Documents\Oil_Creek\USGS\03020500_OilCreek\03020500_IceBreakup_Tookit\config.yaml"
+CONFIG_PATH = r"C:\Users\WeisA\Documents\Oil_Creek\USGS\03020500_OilCreek\03020500_IceBreakup_Toolkit\config.yaml"
 
 with open(CONFIG_PATH, 'r') as file:
     config = yaml.safe_load(file)
@@ -36,51 +36,53 @@ def download_data(site_number, parameter, service, start_date, end_date):
     data = response.json()
     return data
 
-def process_data(data, service):
+def process_data(data, service, parameter):
     """
     Process USGS JSON response into a DataFrame.
+    Handles both daily and instantaneous data.
     """
-    time_series = data['value'].get('timeSeries', [])
-    if not time_series:
-        return pd.DataFrame()
-
+    time_series = data['value']['timeSeries']
     records = []
+
     for series in time_series:
         for value in series['values'][0]['value']:
             records.append({
-                'Date & Time': value['dateTime'],
-                'Value': value['value']
+                'dateTime': value['dateTime'],
+                'value': value['value']
             })
+
     df = pd.DataFrame(records)
-    df['Value'] = pd.to_numeric(df['Value'], errors='coerce')
+
+    # Initialize column_name to ensure it's always defined
+    column_name = 'Value'
 
     if service == 'dv':
-        df['Date'] = pd.to_datetime(df['Date & Time']).dt.date
-        df = df[['Date', 'Value']]
-    else:
-        df['Date & Time'] = pd.to_datetime(df['Date & Time'], errors='coerce', utc=True)
+        df['Date'] = pd.to_datetime(df['dateTime'], errors='coerce').dt.date
+        df.drop(columns=['dateTime'], inplace=True)
+        column_name = 'Discharge (cfs)' if parameter == '00060' else 'Gage Height (ft)'
+        df.rename(columns={'value': column_name}, inplace=True)
+        df = df[['Date', column_name]]
+
+    elif service == 'iv':
+        df['Date & Time'] = pd.to_datetime(df['dateTime'], errors='coerce', utc=True).dt.strftime('%Y-%m-%d %H:%M')
+        df.drop(columns=['dateTime'], inplace=True)
+        column_name = 'Discharge (cfs)' if parameter == '00060' else 'Gage Height (ft)'
+        df.rename(columns={'value': column_name}, inplace=True)
+        df = df[['Date & Time', column_name]]
+
+    # Handle ice indicator (only relevant for discharge)
+    if parameter == '00060':
+        df[column_name] = df[column_name].replace('-999999', 'Ice')
 
     return df
 
-def save_data(df, parameter, service, save_path):
+def save_data(df, save_path):
     """
     Save processed data to CSV.
     """
     if df.empty:
-        logging.warning(f"No data available to save for {parameter} ({service})")
+        logging.warning(f"No data available to save for {save_path}")
         return
-
-    if parameter == '00060':
-        column_name = 'Discharge (cfs)'
-    elif parameter == '00065':
-        column_name = 'Gage Height (ft)'
-    else:
-        column_name = 'Value'
-
-    if service == 'dv':
-        df.rename(columns={'Value': column_name}, inplace=True)
-    else:
-        df.rename(columns={'Value': column_name}, inplace=True)
 
     df.to_csv(save_path, index=False)
 
@@ -101,8 +103,8 @@ def run_downloads():
         logging.info(f"Downloading {parameter} ({service}) data for {gage_number} from {start_date} to {end_date}")
         try:
             data = download_data(gage_number, parameter, service, start_date, end_date)
-            df = process_data(data, service)
-            save_data(df, parameter, service, save_path)
+            df = process_data(data, service, parameter)
+            save_data(df, save_path)
             logging.info(f"Saved to {save_path}")
         except Exception as e:
             logging.error(f"Failed to download {parameter} ({service}) data: {e}")

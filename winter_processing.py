@@ -5,7 +5,7 @@ import numpy as np
 import logging
 
 # Load config
-CONFIG_PATH = r"C:\Users\WeisA\Documents\Oil_Creek\USGS\03020500_OilCreek\03020500_IceBreakup_Tookit\config.yaml"
+CONFIG_PATH = r"C:\Users\WeisA\Documents\Oil_Creek\USGS\03020500_OilCreek\03020500_IceBreakup_Toolkit\config.yaml"
 
 with open(CONFIG_PATH, 'r') as file:
     config = yaml.safe_load(file)
@@ -37,7 +37,6 @@ for subfolder in ['Daily/Qw', 'Inst/Qw', 'Inst/Hw']:
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-
 def load_data(filepath, date_col):
     logging.info(f"Loading data from {filepath}")
     df = pd.read_csv(filepath, parse_dates=[date_col])
@@ -46,8 +45,7 @@ def load_data(filepath, date_col):
     logging.info(f"Loaded {len(df)} rows from {filepath}")
     return df
 
-
-def split_into_winters(df, date_col):
+def split_into_winters(df, date_col, type_key):
     if date_col not in df.columns:
         raise KeyError(f"Expected column '{date_col}' not found in DataFrame")
 
@@ -56,10 +54,15 @@ def split_into_winters(df, date_col):
     for year, group in df.groupby('WaterYear'):
         winter_data = group[(group['Month-Day'] >= WINTER_START) | (group['Month-Day'] <= WINTER_END)]
         if not winter_data.empty:
+            if type_key == 'Daily_Qw':
+                winter_data = winter_data[['Date', 'Discharge (cfs)']]
+            elif type_key == 'Inst_Qw':
+                winter_data = winter_data[['Date & Time', 'Discharge (cfs)']]
+            elif type_key == 'Inst_Hw':
+                winter_data = winter_data[['Date & Time', 'Gage Height (ft)']]
             winters.append((f'{year}-{year + 1}', winter_data))
     logging.info(f"Identified {len(winters)} winter seasons")
     return winters
-
 
 for key, path in data_paths.items():
     if not os.path.exists(path):
@@ -70,12 +73,13 @@ for key, path in data_paths.items():
     df = load_data(path, date_col)
 
     logging.info(f"Processing {key} data")
-    winters = split_into_winters(df, date_col)
+    winters = split_into_winters(df, date_col, key)
 
     for winter_name, winter_data in winters:
         logging.info(f"Processing winter {winter_name} for {key} with {len(winter_data)} rows")
         split_output_path = os.path.join(winter_splits_folder, key.replace('_', '/'),
                                          f'{gage_number}_Winter{key}_{winter_name}.csv')
         winter_data.to_csv(split_output_path, index=False)
+        logging.info(f"Saved winter split: {split_output_path}")
 
-print("Winter data split complete.")
+logging.info("Winter data split complete.")

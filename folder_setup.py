@@ -2,7 +2,7 @@ import os
 import yaml
 
 # Load config
-CONFIG_PATH = r"C:\Users\WeisA\Documents\Oil_Creek\USGS\03020500_OilCreek\03020500_IceBreakup_Tookit\config.yaml"
+CONFIG_PATH = r"C:\Users\WeisA\Documents\Oil_Creek\USGS\03020500_OilCreek\03020500_IceBreakup_Toolkit\config.yaml"
 
 with open(CONFIG_PATH, 'r') as file:
     config = yaml.safe_load(file)
