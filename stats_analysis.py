@@ -30,7 +30,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 def load_and_clean_data(filepath, is_daily):
     """ Load data and clean -999999 and 'Ice' values. """
-    dtype_mapping = {'Discharge (cfs)': 'str'}  # Read discharge as string to handle non-numeric values
+    dtype_mapping = {'Discharge (cfs)': 'str'}
     date_column = 'Date' if is_daily else 'Date & Time'
 
     df = pd.read_csv(filepath, dtype=dtype_mapping, parse_dates=[date_column])
@@ -38,10 +38,7 @@ def load_and_clean_data(filepath, is_daily):
     if not is_daily:
         df['Date'] = df['Date & Time'].dt.strftime('%m-%d')
 
-    # Convert discharge to numeric, coercing errors (turning 'Ice' to NaN)
     df['Discharge (cfs)'] = pd.to_numeric(df['Discharge (cfs)'], errors='coerce')
-
-    # Replace -999999 with NaN
     df['Discharge (cfs)'] = df['Discharge (cfs)'].replace(-999999, np.nan)
 
     return df
@@ -61,17 +58,19 @@ def calculate_daily_statistics(df):
         P95=lambda x: np.nanpercentile(x.dropna(), 95)
     ).reset_index()
 
+    # Format date to ensure consistent leading zero (01-Jan, 02-Jan, ..., 31-Dec)
+    stats['Date'] = pd.to_datetime('2000-' + stats['Date'], format='%Y-%m-%d').dt.strftime('%d-%b')
+
     return stats
 
 def save_statistics(stats_df, filepath):
-    """ Save statistics to CSV with improved formatting. """
+    """ Save statistics to CSV with proper formatting. """
     stats_df.to_csv(filepath, index=False, float_format='%.3f')
     logging.info(f"Saved statistics to {filepath}")
 
 def plot_statistics(stats_df, output_folder, title, prefix):
     """ Plot statistics as both normal and log plots, with shaded percentiles. """
-
-    dates = pd.to_datetime('2000-' + stats_df['Date'], format='%Y-%m-%d')
+    dates = pd.to_datetime('2000-' + stats_df['Date'], format='%Y-%d-%b')
 
     def plot_with_style(ax, log_scale=False):
         ax.fill_between(dates, stats_df['Min'], stats_df['P5'], color='blue', alpha=0.2)
