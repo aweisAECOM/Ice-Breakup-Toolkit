@@ -1,27 +1,43 @@
 gage_number: "03020500"
 site_name: "OilCreek"
 
+# Base folder (you can keep this absolute since this is your machine)
 base_folder: "C:/Users/WeisA/Documents/Oil_Creek/USGS"
+
+# Full project folder path (now explicitly defined)
 project_folder: "${base_folder}/${gage_number}_${site_name}"
 
-data_paths:
-  daily_streamflow: "${project_folder}/Daily/Qw"
-  inst_streamflow: "${project_folder}/Inst/Qw"
-  daily_gageheight: "${project_folder}/Daily/Hw"
-  inst_gageheight: "${project_folder}/Inst/Hw"
+# Folder structure (names only — folder_setup will build full paths using project_folder)
+folders:
+  daily_qw: "Daily/Qw"
+  daily_hw: "Daily/Hw"
+  inst_qw: "Inst/Qw"
+  inst_hw: "Inst/Hw"
+  breakup_events: "BreakupEvents"
+  plots: "Plots"
+  stats: "Stats"
+  processed_data: "ProcessedData"
+  logs: "Logs"
 
+# Date windows
+winter_season:
+  start: "11-01"
+  end: "03-31"
+
+breakup_event_window:
+  days_before: 5
+  days_after: 5
+
+# Available data ranges
 available_dates:
   daily_streamflow: ["1932-10-01", "2025-02-28"]
   inst_streamflow: ["1986-10-01", "2025-02-28"]
   inst_gageheight: ["2007-10-01", "2025-02-28"]
 
-breakup_dates_file: "${project_folder}/BreakupEvents/Event_Dates.txt"
+# Breakup event dates file (directly tied to project_folder)
+breakup_dates_file: "${project_folder}/${folders.breakup_events}/Event_Dates.txt"
 
-output_paths:
-  plots: "${project_folder}/Plots"
-  stats: "${project_folder}/Stats"
-  processed_data: "${project_folder}/ProcessedData"
-
+# Plotting preferences
 plot_settings:
   font: Arial
   fontsize: 12
@@ -34,18 +50,12 @@ plot_settings:
     daily: black
     inst: red
     gage_height: blue
-    event_palette: 
-      - '#1f77b4'  # Blue
-      - '#ff7f0e'  # Orange
-      - '#2ca02c'  # Green
-      - '#d62728'  # Red
-      - '#9467bd'  # Purple
-      - '#8c564b'  # Brown
-      - '#e377c2'  # Pink
-      - '#7f7f7f'  # Gray
-      - '#bcbd22'  # Olive
-      - '#17becf'  # Teal
   linestyle:
     daily: "--"
     inst: "-"
     gage_height: "-"
+
+# Logging settings
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
