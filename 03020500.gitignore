@@ -1,13 +1,29 @@
-# PyCharm and Python Stuff
+# PyCharm project files
 .idea/
+
+# Python cache files
 __pycache__/
 *.pyc
 
-# Data Files
-*.csv
-*.xlsx
+# System files (for Mac users — safe to keep even if you're on Windows)
+.DS_Store
+
+# Ignore temporary plots if you want to regenerate every time
+# (comment out if you want to keep plots in the repo)
 *.tif
 *.png
 
-# Other
-.DS_Store
+# Optional: Ignore temporary raw data downloads (customize this if needed)
+# USGS_download_*.csv
+
+# Keep all processed files (including summaries, final processed events, etc.)
+# No need to block *.csv and *.xlsx globally — you are actively working with them!
+
+# Optional: If you want to ignore only very specific files (like old test files), you could do:
+# ignore_test_*.csv
+
+# Summary files and event dates should definitely be tracked
+!Breakup_Events_Summary.csv
+!Event_Dates.txt
+
+# Add more targeted ignores as you encounter temporary files you don't want in the repo.
