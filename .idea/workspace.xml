@@ -4,11 +4,8 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="a98b8478-5967-4d8c-9be9-edd3ae284cd9" name="Changes" comment="statistical analysis revisions">
+    <list default="true" id="a98b8478-5967-4d8c-9be9-edd3ae284cd9" name="Changes" comment="all">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/breakupevent_processing.py" beforeDir="false" afterPath="$PROJECT_DIR$/breakupevent_processing.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/stats_analysis.py" beforeDir="false" afterPath="$PROJECT_DIR$/stats_analysis.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/winter_plotting.py" beforeDir="false" afterPath="$PROJECT_DIR$/winter_plotting.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -25,6 +22,18 @@
   <component name="Git.Settings">
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
   </component>
+  <component name="GitHubPullRequestSearchHistory"><![CDATA[{
+  "lastFilter": {
+    "state": "OPEN",
+    "assignee": "aweisAECOM"
+  }
+}]]></component>
+  <component name="GithubPullRequestsUISettings"><![CDATA[{
+  "selectedUrlAndAccountId": {
+    "url": "https://github.com/aweisAECOM/Ice-Breakup-Toolkit",
+    "accountId": "0ced0b31-d4bb-4daf-9b16-64ce1139068a"
+  }
+}]]></component>
   <component name="ProblemsViewState">
     <option name="selectedTabId" value="CurrentFile" />
   </component>
@@ -39,7 +48,7 @@
   </component>
   <component name="PropertiesComponent"><![CDATA[{
   "keyToString": {
-    "Python.breakupevent_processing.executor": "Run",
+    "Python.breakupevent_processing.executor": "Debug",
     "Python.data_download.executor": "Run",
     "Python.folder_setup.executor": "Run",
     "Python.stats_analysis.executor": "Run",
@@ -137,7 +146,23 @@
       <option name="project" value="LOCAL" />
       <updated>1741155227502</updated>
     </task>
-    <option name="localTasksCounter" value="6" />
+    <task id="LOCAL-00006" summary="all">
+      <option name="closed" value="true" />
+      <created>1741284018045</created>
+      <option name="number" value="00006" />
+      <option name="presentableId" value="LOCAL-00006" />
+      <option name="project" value="LOCAL" />
+      <updated>1741284018045</updated>
+    </task>
+    <task id="LOCAL-00007" summary="all">
+      <option name="closed" value="true" />
+      <created>1741285004927</created>
+      <option name="number" value="00007" />
+      <option name="presentableId" value="LOCAL-00007" />
+      <option name="project" value="LOCAL" />
+      <updated>1741285004927</updated>
+    </task>
+    <option name="localTasksCounter" value="8" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -155,6 +180,7 @@
     <MESSAGE value="commit" />
     <MESSAGE value="Finalize Winter Plotting with Flexible Data Handling and Axis Fix" />
     <MESSAGE value="statistical analysis revisions" />
-    <option name="LAST_COMMIT_MESSAGE" value="statistical analysis revisions" />
+    <MESSAGE value="all" />
+    <option name="LAST_COMMIT_MESSAGE" value="all" />
   </component>
 </project>
