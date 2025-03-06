@@ -10,7 +10,6 @@ project_folder: "${base_folder}/${gage_number}_${site_name}"
 # Folder structure (names only — folder_setup will build full paths using project_folder)
 folders:
   daily_qw: "Daily/Qw"
-  daily_hw: "Daily/Hw"
   inst_qw: "Inst/Qw"
   inst_hw: "Inst/Hw"
   breakup_events: "BreakupEvents"
