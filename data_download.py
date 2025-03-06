@@ -3,112 +3,159 @@ import yaml
 import requests
 import pandas as pd
 import logging
+import datetime
+import json
 
 # Load config
-CONFIG_PATH = r"C:\Users\WeisA\Documents\Oil_Creek\USGS\03020500_OilCreek\03020500_IceBreakup_Toolkit\config.yaml"
+CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
 
 with open(CONFIG_PATH, 'r') as file:
     config = yaml.safe_load(file)
 
-# Setup paths and parameters
+project_folder = config['project_folder'].replace("${base_folder}", config['base_folder']).replace("${gage_number}", config['gage_number']).replace("${site_name}", config['site_name'])
 gage_number = config['gage_number']
-site_name = config['site_name']
-base_folder = config['base_folder']
-project_folder = os.path.join(base_folder, f"{gage_number}_{site_name}")
-
 available_dates = config['available_dates']
 
-# Ensure subfolders exist
-for subfolder in ["Daily/Qw", "Inst/Qw", "Inst/Hw"]:
-    folder_path = os.path.join(project_folder, subfolder)
-    os.makedirs(folder_path, exist_ok=True)
+log_folder = os.path.join(project_folder, config['folders']['logs'])
+os.makedirs(log_folder, exist_ok=True)
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+log_file = os.path.join(log_folder, f"data_downloader_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.log")
+logging.basicConfig(filename=log_file, level=getattr(logging, config['logging']['level']), format=config['logging']['format'])
 
-def download_data(site_number, parameter, service, start_date, end_date):
-    """
-    Download data directly from USGS NWIS.
-    """
-    url = f'https://waterservices.usgs.gov/nwis/{service}/?format=json&sites={site_number}&parameterCd={parameter}&startDT={start_date}&endDT={end_date}'
+def get_folder_path(key):
+    return os.path.join(project_folder, config['folders'][key])
+
+for key in ['daily_qw', 'inst_qw', 'inst_hw']:
+    os.makedirs(get_folder_path(key), exist_ok=True)
+    os.makedirs(os.path.join(get_folder_path(key), 'raw'), exist_ok=True)
+
+def download_data(site, param, service, start, end):
+    url = f'https://waterservices.usgs.gov/nwis/{service}/?format=json&sites={site}&parameterCd={param}&startDT={start}&endDT={end}'
+    logging.info(f"Requesting data from: {url}")
     response = requests.get(url)
     response.raise_for_status()
-    data = response.json()
-    return data
+    return response.json()
 
-def process_data(data, service, parameter):
-    """
-    Process USGS JSON response into a DataFrame.
-    Handles both daily and instantaneous data.
-    """
-    time_series = data['value']['timeSeries']
+def process_data(raw_data, service, param):
     records = []
-
-    for series in time_series:
+    for series in raw_data['value']['timeSeries']:
         for value in series['values'][0]['value']:
-            records.append({
-                'dateTime': value['dateTime'],
-                'value': value['value']
-            })
+            records.append({'dateTime': value['dateTime'], 'value': value['value']})
 
     df = pd.DataFrame(records)
 
-    # Initialize column_name to ensure it's always defined
-    column_name = 'Value'
+    col = 'Discharge (cfs)' if param == '00060' else 'Gage Height (ft)'
+    df['Date & Time'] = pd.to_datetime(df['dateTime'], utc=True).dt.tz_convert(None)
+    df.drop(columns='dateTime', inplace=True)
+    df.rename(columns={'value': col}, inplace=True)
 
     if service == 'dv':
-        df['Date'] = pd.to_datetime(df['dateTime'], errors='coerce').dt.date
-        df.drop(columns=['dateTime'], inplace=True)
-        column_name = 'Discharge (cfs)' if parameter == '00060' else 'Gage Height (ft)'
-        df.rename(columns={'value': column_name}, inplace=True)
-        df = df[['Date', column_name]]
+        df['Date & Time'] = df['Date & Time'].dt.floor('D') + pd.Timedelta(hours=12)
 
-    elif service == 'iv':
-        df['Date & Time'] = pd.to_datetime(df['dateTime'], errors='coerce', utc=True).dt.strftime('%Y-%m-%d %H:%M')
-        df.drop(columns=['dateTime'], inplace=True)
-        column_name = 'Discharge (cfs)' if parameter == '00060' else 'Gage Height (ft)'
-        df.rename(columns={'value': column_name}, inplace=True)
-        df = df[['Date & Time', column_name]]
-
-    # Handle ice indicator (only relevant for discharge)
-    if parameter == '00060':
-        df[column_name] = df[column_name].replace('-999999', 'Ice')
+    if param == '00060':
+        df[col] = df[col].replace('-999999', 'Ice')
 
     return df
 
-def save_data(df, save_path):
-    """
-    Save processed data to CSV.
-    """
-    if df.empty:
-        logging.warning(f"No data available to save for {save_path}")
-        return
+def analyze_data_with_intervals(df, data_type):
+    df['gap'] = df['Date & Time'].diff().dt.total_seconds() / 60  # Gaps in minutes
+    median_interval = df['gap'][df['gap'] <= 120].median()  # Ignore gaps > 2 hours for interval calc
 
-    df.to_csv(save_path, index=False)
+    if data_type == 'daily':
+        expected_periods = (df['Date & Time'].max() - df['Date & Time'].min()).days + 1
+    else:
+        expected_periods = ((df['Date & Time'].max() - df['Date & Time'].min()).total_seconds() / (median_interval * 60)) + 1
+
+    completeness = 100 * len(df) / expected_periods
+
+    gaps = []
+    interval_changes = []
+
+    if data_type == 'inst':
+        previous_interval = df['gap'].iloc[1] if len(df) > 1 else median_interval
+        for i in range(2, len(df)):
+            current_interval = df['gap'].iloc[i]
+
+            if current_interval > 120:  # Long gaps (ignored for interval calc)
+                gaps.append(f"{df['Date & Time'].iloc[i-1]} to {df['Date & Time'].iloc[i]}")
+                continue
+
+            if current_interval != previous_interval:
+                interval_changes.append({
+                    "start": df['Date & Time'].iloc[i-1],
+                    "end": df['Date & Time'].iloc[i],
+                    "interval_minutes": current_interval
+                })
+
+            previous_interval = current_interval
+
+    logging.info(f"Completeness: {completeness:.2f}%, Median Interval: {median_interval:.2f} minutes")
+    if interval_changes:
+        logging.warning(f"Detected {len(interval_changes)} interval changes.")
+    if gaps:
+        logging.warning(f"Detected {len(gaps)} significant data gaps.")
+
+    return completeness, gaps, median_interval, interval_changes
+
+def save_metadata(metadata_path, gage, param, service, start, end, completeness, gaps, interval, interval_changes):
+    metadata = {
+        "gage_number": gage,
+        "parameter": param,
+        "service": service,
+        "download_date": datetime.datetime.now().isoformat(),
+        "start_date": start,
+        "end_date": end,
+        "completeness_percent": round(completeness, 2),
+        "major_gaps": gaps,
+        "sampling_interval_minutes": round(interval, 2),
+        "interval_changes": interval_changes
+    }
+    with open(metadata_path, 'w') as f:
+        json.dump(metadata, f, indent=4, default=str)
+
+def save_data(df, save_path):
+    header = [
+        f"# Gage: {gage_number}",
+        f"# Downloaded: {datetime.datetime.now().isoformat()}",
+        f"# Processed with Ice-Breakup-Toolkit v1.0",
+        ""
+    ]
+    with open(save_path, 'w') as f:
+        f.write('\n'.join(header))
+        df.to_csv(f, index=False)
 
 def run_downloads():
-    """
-    Manage download, processing, and saving for all required datasets.
-    """
     datasets = [
-        ('00060', 'dv', 'Daily/Qw', f'{gage_number}_Daily_Qw.csv', available_dates['daily_streamflow']),
-        ('00060', 'iv', 'Inst/Qw', f'{gage_number}_Inst_Qw.csv', available_dates['inst_streamflow']),
-        ('00065', 'iv', 'Inst/Hw', f'{gage_number}_Inst_Hw.csv', available_dates['inst_gageheight']),
+        ('00060', 'dv', 'daily_qw', f'{gage_number}_Daily_Qw.csv', available_dates['daily_streamflow'], 'daily'),
+        ('00060', 'iv', 'inst_qw', f'{gage_number}_Inst_Qw.csv', available_dates['inst_streamflow'], 'inst'),
+        ('00065', 'iv', 'inst_hw', f'{gage_number}_Inst_Hw.csv', available_dates['inst_gageheight'], 'inst')
     ]
 
-    for parameter, service, folder, filename, dates in datasets:
-        start_date, end_date = dates
-        save_path = os.path.join(project_folder, folder, filename)
+    for param, service, folder_key, file_name, dates, data_type in datasets:
+        start, end = dates
+        folder = get_folder_path(folder_key)
 
-        logging.info(f"Downloading {parameter} ({service}) data for {gage_number} from {start_date} to {end_date}")
+        raw_path = os.path.join(folder, 'raw', f"{file_name.replace('.csv', '_raw.json')}")
+        processed_path = os.path.join(folder, file_name)
+        metadata_path = os.path.join(folder, file_name.replace('.csv', '_metadata.json'))
+
         try:
-            data = download_data(gage_number, parameter, service, start_date, end_date)
-            df = process_data(data, service, parameter)
-            save_data(df, save_path)
-            logging.info(f"Saved to {save_path}")
+            raw_data = download_data(gage_number, param, service, start, end)
+            with open(raw_path, 'w') as f:
+                json.dump(raw_data, f, indent=4)
+
+            df = process_data(raw_data, service, param)
+            completeness, gaps, interval, interval_changes = analyze_data_with_intervals(df, data_type)
+
+            save_data(df, processed_path)
+            save_metadata(metadata_path, gage_number, param, service, start, end, completeness, gaps, interval, interval_changes)
+
+            logging.info(f"Successfully saved processed data to {processed_path}")
+            logging.info(f"Metadata saved to {metadata_path}")
+
         except Exception as e:
-            logging.error(f"Failed to download {parameter} ({service}) data: {e}")
+            logging.error(f"Failed to download {param} ({service}) data: {e}")
 
 if __name__ == "__main__":
     run_downloads()
-    print("Data download completed.")
+    print(f"Data download completed. See log for details: {log_file}")
