@@ -1,85 +1,136 @@
 import os
 import yaml
 import pandas as pd
-import numpy as np
 import logging
+import datetime
+import json
 
 # Load config
-CONFIG_PATH = r"C:\Users\WeisA\Documents\Oil_Creek\USGS\03020500_OilCreek\03020500_IceBreakup_Toolkit\config.yaml"
-
+CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
 with open(CONFIG_PATH, 'r') as file:
     config = yaml.safe_load(file)
 
-# Setup paths and parameters
+project_folder = config['project_folder'].replace("${base_folder}", config['base_folder']).replace("${gage_number}",
+                                                                                                   config[
+                                                                                                       'gage_number']).replace(
+    "${site_name}", config['site_name'])
 gage_number = config['gage_number']
-site_name = config['site_name']
-base_folder = config['base_folder']
-project_folder = os.path.join(base_folder, f"{gage_number}_{site_name}")
 
-# Define winter date range
-WINTER_START = "11-01"
-WINTER_END = "03-31"
+# Set up logging
+log_folder = os.path.join(project_folder, config['folders']['logs'])
+os.makedirs(log_folder, exist_ok=True)
+log_file = os.path.join(log_folder, f"winter_processing_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.log")
+logging.basicConfig(filename=log_file, level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-# Define paths
-data_paths = {
-    'Daily_Qw': os.path.join(project_folder, 'Daily', 'Qw', f'{gage_number}_Daily_Qw.csv'),
-    'Inst_Qw': os.path.join(project_folder, 'Inst', 'Qw', f'{gage_number}_Inst_Qw.csv'),
-    'Inst_Hw': os.path.join(project_folder, 'Inst', 'Hw', f'{gage_number}_Inst_Hw.csv')
+# Expected columns for each data type
+EXPECTED_COLUMNS = {
+    'Daily_Qw': {'date': 'Date & Time', 'value': 'Discharge (cfs)'},
+    'Inst_Qw': {'date': 'Date & Time', 'value': 'Discharge (cfs)'},
+    'Inst_Hw': {'date': 'Date & Time', 'value': 'Gage Height (ft)'}
 }
 
-# Define output folder
-winter_splits_folder = os.path.join(project_folder, 'ProcessedData', 'Winter_Splits')
+# Input paths and metadata paths
+input_paths = {
+    'Daily_Qw': os.path.join(project_folder, config['folders']['daily_qw'], f'{gage_number}_Daily_Qw.csv'),
+    'Inst_Qw': os.path.join(project_folder, config['folders']['inst_qw'], f'{gage_number}_Inst_Qw.csv'),
+    'Inst_Hw': os.path.join(project_folder, config['folders']['inst_hw'], f'{gage_number}_Inst_Hw.csv')
+}
+metadata_paths = {k: v.replace('.csv', '_metadata.json') for k, v in input_paths.items()}
 
-# Ensure folders exist
-for subfolder in ['Daily/Qw', 'Inst/Qw', 'Inst/Hw']:
-    os.makedirs(os.path.join(winter_splits_folder, subfolder), exist_ok=True)
+# Output folder
+winter_splits_folder = os.path.join(project_folder, config['folders']['processed_data'], 'Winter_Splits')
+os.makedirs(winter_splits_folder, exist_ok=True)
 
-# Setup logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def load_data(filepath, date_col):
-    logging.info(f"Loading data from {filepath}")
-    df = pd.read_csv(filepath, parse_dates=[date_col])
+def load_and_validate_data(file_path, data_type):
+    with open(file_path, 'r') as file:
+        header_index = 0
+        for i, line in enumerate(file):
+            if not line.startswith("#"):
+                header_index = i
+                break
+
+    df = pd.read_csv(file_path, skiprows=header_index)
+    expected_cols = EXPECTED_COLUMNS[data_type]
+
+    if not all(col in df.columns for col in expected_cols.values()):
+        raise ValueError(
+            f"Column mismatch in {file_path}. Expected: {expected_cols.values()}, Found: {df.columns.tolist()}")
+
+    df[expected_cols['date']] = pd.to_datetime(df[expected_cols['date']])
+    df[expected_cols['value']] = pd.to_numeric(df[expected_cols['value']], errors='coerce')
+
+    logging.info(f"{data_type} columns validated. Sample data:\n{df.head()}")
+
+    return df, expected_cols['date'], expected_cols['value']
+
+
+def generate_full_winter_index(start_year, interval_minutes, daily=False):
+    nov1 = datetime.datetime(start_year, 11, 1)
+    mar31 = datetime.datetime(start_year + 1, 3, 31)
+
+    if daily:
+        return pd.date_range(nov1, mar31, freq='D') + pd.Timedelta(hours=12)
+    else:
+        return pd.date_range(nov1, mar31, freq=f'{interval_minutes}min')
+
+
+def process_data_type(data_type):
+    file_path = input_paths[data_type]
+    metadata_path = metadata_paths[data_type]
+
+    if not os.path.exists(file_path):
+        logging.warning(f"Missing file for {data_type}, skipping.")
+        return
+
+    with open(metadata_path, 'r') as meta_file:
+        metadata = json.load(meta_file)
+        interval_minutes = metadata.get('sampling_interval_minutes', 1440 if 'Daily' in data_type else 15)
+
+    df, date_col, value_col = load_and_validate_data(file_path, data_type)
+
     df['Month-Day'] = df[date_col].dt.strftime('%m-%d')
-    df['Year'] = df[date_col].dt.year
-    logging.info(f"Loaded {len(df)} rows from {filepath}")
-    return df
+    df['WaterYear'] = df[date_col].apply(lambda d: d.year if d.month >= 11 else d.year - 1)
 
-def split_into_winters(df, date_col, type_key):
-    if date_col not in df.columns:
-        raise KeyError(f"Expected column '{date_col}' not found in DataFrame")
+    winter_data = df[(df['Month-Day'] >= '11-01') | (df['Month-Day'] <= '03-31')]
 
-    df['WaterYear'] = np.where(df[date_col].dt.month >= 11, df['Year'], df['Year'] - 1)
-    winters = []
-    for year, group in df.groupby('WaterYear'):
-        winter_data = group[(group['Month-Day'] >= WINTER_START) | (group['Month-Day'] <= WINTER_END)]
-        if not winter_data.empty:
-            if type_key == 'Daily_Qw':
-                winter_data = winter_data[['Date', 'Discharge (cfs)']]
-            elif type_key == 'Inst_Qw':
-                winter_data = winter_data[['Date & Time', 'Discharge (cfs)']]
-            elif type_key == 'Inst_Hw':
-                winter_data = winter_data[['Date & Time', 'Gage Height (ft)']]
-            winters.append((f'{year}-{year + 1}', winter_data))
-    logging.info(f"Identified {len(winters)} winter seasons")
-    return winters
+    summary = []
+    for water_year, season_data in winter_data.groupby('WaterYear'):
+        expected_index = generate_full_winter_index(water_year, interval_minutes, daily=('Daily' in data_type))
 
-for key, path in data_paths.items():
-    if not os.path.exists(path):
-        logging.warning(f"{path} does not exist, skipping.")
-        continue
+        logging.info(
+            f"Processing {water_year}-{water_year + 1} ({data_type}) - Expected Index Sample:\n{expected_index[:5]}")
 
-    date_col = 'Date & Time' if 'Inst' in key else 'Date'
-    df = load_data(path, date_col)
+        season_data = season_data.set_index(date_col).reindex(expected_index)
+        season_data[value_col] = season_data[value_col].astype(float)
 
-    logging.info(f"Processing {key} data")
-    winters = split_into_winters(df, date_col, key)
+        season_data = season_data.reset_index().rename(columns={'index': date_col})
+        completeness = season_data[value_col].notna().mean() * 100
 
-    for winter_name, winter_data in winters:
-        logging.info(f"Processing winter {winter_name} for {key} with {len(winter_data)} rows")
-        split_output_path = os.path.join(winter_splits_folder, key.replace('_', '/'),
-                                         f'{gage_number}_Winter{key}_{winter_name}.csv')
-        winter_data.to_csv(split_output_path, index=False)
-        logging.info(f"Saved winter split: {split_output_path}")
+        output_folder = os.path.join(winter_splits_folder, *data_type.lower().split('_'))
+        os.makedirs(output_folder, exist_ok=True)
 
-logging.info("Winter data split complete.")
+        output_file = os.path.join(output_folder,
+                                   f"{gage_number}_Winter{data_type.replace('_', '')}_{water_year}-{water_year + 1}.csv")
+        season_data.to_csv(output_file, index=False)
+
+        summary.append(f"{water_year}-{water_year + 1}: Completeness = {completeness:.2f}%")
+        logging.info(
+            f"Saved winter data for {water_year}-{water_year + 1} ({data_type}) - Completeness = {completeness:.2f}%")
+
+    summary_path = os.path.join(winter_splits_folder, f"{gage_number}_{data_type}_WinterSummary.txt")
+    with open(summary_path, 'w') as f:
+        f.write("\n".join(summary))
+    logging.info(f"Winter summary for {data_type} saved to {summary_path}")
+
+
+def process_all():
+    for data_type in input_paths.keys():
+        logging.info(f"Processing {data_type}")
+        process_data_type(data_type)
+
+
+if __name__ == "__main__":
+    logging.info("Starting winter processing.")
+    process_all()
+    logging.info("Winter processing completed. See log for details: " + log_file)
