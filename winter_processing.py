@@ -11,8 +11,7 @@ with open(CONFIG_PATH, 'r') as file:
     config = yaml.safe_load(file)
 
 project_folder = config['project_folder'].replace("${base_folder}", config['base_folder']).replace("${gage_number}",
-                                                                                                   config[
-                                                                                                       'gage_number']).replace(
+                                                                                                   config['gage_number']).replace(
     "${site_name}", config['site_name'])
 gage_number = config['gage_number']
 
@@ -29,7 +28,7 @@ EXPECTED_COLUMNS = {
     'Inst_Hw': {'date': 'Date & Time', 'value': 'Gage Height (ft)'}
 }
 
-# Input paths and metadata paths
+# Input and metadata paths
 input_paths = {
     'Daily_Qw': os.path.join(project_folder, config['folders']['daily_qw'], f'{gage_number}_Daily_Qw.csv'),
     'Inst_Qw': os.path.join(project_folder, config['folders']['inst_qw'], f'{gage_number}_Inst_Qw.csv'),
@@ -98,10 +97,11 @@ def process_data_type(data_type):
     for water_year, season_data in winter_data.groupby('WaterYear'):
         expected_index = generate_full_winter_index(water_year, interval_minutes, daily=('Daily' in data_type))
 
-        logging.info(
-            f"Processing {water_year}-{water_year + 1} ({data_type}) - Expected Index Sample:\n{expected_index[:5]}")
+        if 'Daily' in data_type:
+            season_data = season_data.set_index(date_col).reindex(expected_index)
+        else:
+            season_data = season_data.set_index(date_col).reindex(expected_index)
 
-        season_data = season_data.set_index(date_col).reindex(expected_index)
         season_data[value_col] = season_data[value_col].astype(float)
 
         season_data = season_data.reset_index().rename(columns={'index': date_col})
