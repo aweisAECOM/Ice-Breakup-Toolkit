@@ -1,139 +1,142 @@
 import os
 import yaml
 import pandas as pd
-import numpy as np
 import logging
-import matplotlib.pyplot as plt
+import datetime
 
 # Load config
-CONFIG_PATH = r"C:\Users\WeisA\Documents\Oil_Creek\USGS\03020500_OilCreek\03020500_IceBreakup_Toolkit\config.yaml"
-
+CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
 with open(CONFIG_PATH, 'r') as file:
     config = yaml.safe_load(file)
 
-# Setup paths and parameters
+project_folder = config['project_folder'].replace("${base_folder}", config['base_folder']).replace("${gage_number}", config['gage_number']).replace("${site_name}", config['site_name'])
 gage_number = config['gage_number']
-site_name = config['site_name']
-base_folder = config['base_folder']
-project_folder = os.path.join(base_folder, f"{gage_number}_{site_name}")
 
-inst_qw_path = os.path.join(project_folder, 'Inst', 'Qw', f'{gage_number}_Inst_Qw.csv')
-daily_qw_path = os.path.join(project_folder, 'Daily', 'Qw', f'{gage_number}_Daily_Qw.csv')
-stats_folder = os.path.join(project_folder, 'Stats')
-plots_folder = os.path.join(project_folder, 'Plots')
-
+log_folder = os.path.join(project_folder, config['folders']['logs'])
+stats_folder = os.path.join(project_folder, "Stats")
+os.makedirs(log_folder, exist_ok=True)
 os.makedirs(stats_folder, exist_ok=True)
-os.makedirs(plots_folder, exist_ok=True)
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+log_file = os.path.join(log_folder, f"stats_analysis_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.log")
+logging.basicConfig(filename=log_file, level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-def load_and_clean_data(filepath, is_daily):
-    """ Load data and clean -999999 and 'Ice' values. """
-    dtype_mapping = {'Discharge (cfs)': 'str'}
-    date_column = 'Date' if is_daily else 'Date & Time'
+# Paths to data files
+daily_qw_path = os.path.join(project_folder, config['folders']['daily_qw'], f"{gage_number}_Daily_Qw.csv")
+inst_qw_path = os.path.join(project_folder, config['folders']['inst_qw'], f"{gage_number}_Inst_Qw.csv")
+inst_hw_path = os.path.join(project_folder, config['folders']['inst_hw'], f"{gage_number}_Inst_Hw.csv")
 
-    df = pd.read_csv(filepath, dtype=dtype_mapping, parse_dates=[date_column])
+def load_data(file_path):
+    with open(file_path, 'r') as file:
+        header_index = 0
+        for i, line in enumerate(file):
+            if not line.startswith("#"):
+                header_index = i
+                break
 
-    if not is_daily:
-        df['Date'] = df['Date & Time'].dt.strftime('%m-%d')
+    df = pd.read_csv(file_path, skiprows=header_index)
 
-    df['Discharge (cfs)'] = pd.to_numeric(df['Discharge (cfs)'], errors='coerce')
-    df['Discharge (cfs)'] = df['Discharge (cfs)'].replace(-999999, np.nan)
+    date_col = None
+    value_col = None
+    for col in df.columns:
+        if "Date" in col:
+            date_col = col
+        elif "Discharge" in col or "Gage Height" in col:
+            value_col = col
 
-    return df
+    if date_col is None or value_col is None:
+        raise ValueError(f"Could not detect Date/Value columns in {file_path}")
 
-def calculate_daily_statistics(df):
-    """ Calculate min, max, mean, and percentiles for each calendar day. """
-    grouped = df.groupby('Date')['Discharge (cfs)']
+    df[date_col] = pd.to_datetime(df[date_col])
+    df[value_col] = pd.to_numeric(df[value_col], errors='coerce')
 
-    stats = grouped.agg(
-        Min='min',
-        Max='max',
-        Mean='mean',
-        P5=lambda x: np.nanpercentile(x.dropna(), 5),
-        P25=lambda x: np.nanpercentile(x.dropna(), 25),
-        P50=lambda x: np.nanpercentile(x.dropna(), 50),
-        P75=lambda x: np.nanpercentile(x.dropna(), 75),
-        P95=lambda x: np.nanpercentile(x.dropna(), 95)
-    ).reset_index()
+    return df, date_col, value_col
 
-    # Format date to ensure consistent leading zero (01-Jan, 02-Jan, ..., 31-Dec)
-    stats['Date'] = pd.to_datetime('2000-' + stats['Date'], format='%Y-%m-%d').dt.strftime('%d-%b')
+def calculate_daily_stats(df, date_col, value_col):
+    df['DayOfYear'] = df[date_col].dt.strftime("%m-%d")
+    grouped = df.groupby('DayOfYear')[value_col].agg([
+        'min', 'max', 'mean', 'median',
+        lambda x: x.quantile(0.05),
+        lambda x: x.quantile(0.25),
+        lambda x: x.quantile(0.75),
+        lambda x: x.quantile(0.95)
+    ])
+    grouped.columns = ['Min', 'Max', 'Mean', 'Median', 'P5', 'P25', 'P75', 'P95']
+    return grouped.round(0)
 
-    return stats
+def calculate_monthly_stats(df, date_col, value_col):
+    df['Month'] = df[date_col].dt.strftime("%Y-%m")
+    grouped = df.groupby('Month')[value_col].agg([
+        'min', 'max', 'mean', 'median',
+        lambda x: x.quantile(0.05),
+        lambda x: x.quantile(0.25),
+        lambda x: x.quantile(0.75),
+        lambda x: x.quantile(0.95)
+    ])
+    grouped.columns = ['Min', 'Max', 'Mean', 'Median', 'P5', 'P25', 'P75', 'P95']
+    return grouped.round(0)
 
-def save_statistics(stats_df, filepath):
-    """ Save statistics to CSV with proper formatting. """
-    stats_df.to_csv(filepath, index=False, float_format='%.3f')
-    logging.info(f"Saved statistics to {filepath}")
+def calculate_monthly_summary_stats(df, date_col, value_col):
+    df['Month'] = df[date_col].dt.strftime("%m")
+    grouped = df.groupby('Month')[value_col].agg([
+        'min', 'max', 'mean', 'median',
+        lambda x: x.quantile(0.05),
+        lambda x: x.quantile(0.25),
+        lambda x: x.quantile(0.75),
+        lambda x: x.quantile(0.95)
+    ])
+    grouped.columns = ['Min', 'Max', 'Mean', 'Median', 'P5', 'P25', 'P75', 'P95']
+    grouped.index = grouped.index.map(lambda x: datetime.datetime.strptime(x, '%m').strftime('%B'))
+    return grouped.round(0)
 
-def plot_statistics(stats_df, output_folder, title, prefix):
-    """ Plot statistics as both normal and log plots, with shaded percentiles. """
-    dates = pd.to_datetime('2000-' + stats_df['Date'], format='%Y-%d-%b')
+def process_and_save_stats(file_path, daily_output_name, monthly_output_name, monthly_summary_output_name):
+    try:
+        df, date_col, value_col = load_data(file_path)
 
-    def plot_with_style(ax, log_scale=False):
-        ax.fill_between(dates, stats_df['Min'], stats_df['P5'], color='blue', alpha=0.2)
-        ax.fill_between(dates, stats_df['P5'], stats_df['P25'], color='blue', alpha=0.15)
-        ax.fill_between(dates, stats_df['P25'], stats_df['P50'], color='blue', alpha=0.1)
-        ax.fill_between(dates, stats_df['P50'], stats_df['P75'], color='red', alpha=0.1)
-        ax.fill_between(dates, stats_df['P75'], stats_df['P95'], color='red', alpha=0.15)
-        ax.fill_between(dates, stats_df['P95'], stats_df['Max'], color='red', alpha=0.2)
+        # Daily stats
+        daily_stats = calculate_daily_stats(df, date_col, value_col)
+        daily_stats_path = os.path.join(stats_folder, daily_output_name)
+        daily_stats.to_csv(daily_stats_path)
+        logging.info(f"Saved daily climatology stats to: {daily_stats_path}")
 
-        ax.plot(dates, stats_df['Min'], color='blue', linestyle='-', label='Min')
-        ax.plot(dates, stats_df['Max'], color='red', linestyle='-', label='Max')
-        ax.plot(dates, stats_df['Mean'], color='black', linestyle='-', label='Mean')
-        ax.plot(dates, stats_df['P50'], color='black', linestyle='--', label='Median (50th)')
+        # Monthly stats (each month per year)
+        monthly_stats = calculate_monthly_stats(df, date_col, value_col)
+        monthly_stats_path = os.path.join(stats_folder, monthly_output_name)
+        monthly_stats.to_csv(monthly_stats_path)
+        logging.info(f"Saved monthly climatology stats to: {monthly_stats_path}")
 
-        ax.set_xlabel("Date")
-        ax.set_ylabel("Discharge (cfs)")
+        # Monthly summary stats (one row per month across all years)
+        monthly_summary_stats = calculate_monthly_summary_stats(df, date_col, value_col)
+        monthly_summary_stats_path = os.path.join(stats_folder, monthly_summary_output_name)
+        monthly_summary_stats.to_csv(monthly_summary_stats_path)
+        logging.info(f"Saved monthly summary stats to: {monthly_summary_stats_path}")
 
-        ax.set_xticks(pd.to_datetime(['2000-01-01', '2000-04-01', '2000-07-01', '2000-10-01', '2000-12-31']))
-        ax.set_xticklabels(['Jan-01', 'Apr-01', 'Jul-01', 'Oct-01', 'Dec-31'])
-        ax.set_xlim(pd.to_datetime('2000-01-01'), pd.to_datetime('2000-12-31'))
-
-        if log_scale:
-            ax.set_yscale('log')
-            ax.set_title(f"{title} (Log Scale)")
-        else:
-            ax.set_title(f"{title}")
-
-        ax.legend()
-
-    fig, ax = plt.subplots(figsize=(10, 5))
-    plot_with_style(ax, log_scale=False)
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_folder, f'{prefix}_Stats_Normal.tif'), dpi=600)
-    plt.close()
-
-    fig, ax = plt.subplots(figsize=(10, 5))
-    plot_with_style(ax, log_scale=True)
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_folder, f'{prefix}_Stats_Log.tif'), dpi=600)
-    plt.close()
-
-def process_and_plot(filepath, is_daily, title, prefix):
-    df = load_and_clean_data(filepath, is_daily)
-
-    if is_daily:
-        df['Date'] = df['Date'].dt.strftime('%m-%d')
-
-    stats_df = calculate_daily_statistics(df)
-    save_statistics(stats_df, os.path.join(stats_folder, f'{prefix}_Stats.csv'))
-    plot_statistics(stats_df, plots_folder, title, prefix)
+    except Exception as e:
+        logging.error(f"Error processing {file_path}: {e}")
 
 def main():
-    logging.info("Starting statistical analysis and plotting for Instantaneous and Daily Streamflow (Qw)")
+    logging.info("Starting statistical analysis.")
 
-    process_and_plot(inst_qw_path, is_daily=False,
-                     title=f'{gage_number} Historical Instantaneous Streamflow Statistics',
-                     prefix=f'{gage_number}_InstQw')
+    process_and_save_stats(
+        daily_qw_path,
+        "DailyStats_Daily_Qw.csv",
+        "MonthlyStats_Daily_Qw.csv",
+        "MonthlySummaryStats_Daily_Qw.csv"
+    )
+    process_and_save_stats(
+        inst_qw_path,
+        "DailyStats_Inst_Qw.csv",
+        "MonthlyStats_Inst_Qw.csv",
+        "MonthlySummaryStats_Inst_Qw.csv"
+    )
+    process_and_save_stats(
+        inst_hw_path,
+        "DailyStats_Inst_Hw.csv",
+        "MonthlyStats_Inst_Hw.csv",
+        "MonthlySummaryStats_Inst_Hw.csv"
+    )
 
-    process_and_plot(daily_qw_path, is_daily=True,
-                     title=f'{gage_number} Historical Daily Streamflow Statistics',
-                     prefix=f'{gage_number}_DailyQw')
-
-    logging.info("Statistical analysis and plotting completed for both data sets.")
+    logging.info("Statistical analysis completed.")
 
 if __name__ == "__main__":
     main()
+    print(f"Statistical analysis completed. See log for details: {log_file}")
