@@ -8,7 +8,6 @@ import json
 
 # Load config
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
-
 with open(CONFIG_PATH, 'r') as file:
     config = yaml.safe_load(file)
 
@@ -43,7 +42,6 @@ def process_data(raw_data, service, param):
             records.append({'dateTime': value['dateTime'], 'value': value['value']})
 
     df = pd.DataFrame(records)
-
     col = 'Discharge (cfs)' if param == '00060' else 'Gage Height (ft)'
     df['Date & Time'] = pd.to_datetime(df['dateTime'], utc=True).dt.tz_convert(None)
     df.drop(columns='dateTime', inplace=True)
@@ -58,13 +56,14 @@ def process_data(raw_data, service, param):
     return df
 
 def analyze_data_with_intervals(df, data_type):
-    df['gap'] = df['Date & Time'].diff().dt.total_seconds() / 60  # Gaps in minutes
-    median_interval = df['gap'][df['gap'] <= 120].median()  # Ignore gaps > 2 hours for interval calc
+    df['gap'] = df['Date & Time'].diff().dt.total_seconds() / 60
+    median_interval = df['gap'][df['gap'] <= 120].median()
+    sampling_interval = 1440 if data_type == 'daily' else median_interval
 
     if data_type == 'daily':
         expected_periods = (df['Date & Time'].max() - df['Date & Time'].min()).days + 1
     else:
-        expected_periods = ((df['Date & Time'].max() - df['Date & Time'].min()).total_seconds() / (median_interval * 60)) + 1
+        expected_periods = ((df['Date & Time'].max() - df['Date & Time'].min()).total_seconds() / (sampling_interval * 60)) + 1
 
     completeness = 100 * len(df) / expected_periods
 
@@ -72,11 +71,11 @@ def analyze_data_with_intervals(df, data_type):
     interval_changes = []
 
     if data_type == 'inst':
-        previous_interval = df['gap'].iloc[1] if len(df) > 1 else median_interval
+        previous_interval = df['gap'].iloc[1] if len(df) > 1 else sampling_interval
         for i in range(2, len(df)):
             current_interval = df['gap'].iloc[i]
 
-            if current_interval > 120:  # Long gaps (ignored for interval calc)
+            if current_interval > 120:
                 gaps.append(f"{df['Date & Time'].iloc[i-1]} to {df['Date & Time'].iloc[i]}")
                 continue
 
@@ -89,13 +88,7 @@ def analyze_data_with_intervals(df, data_type):
 
             previous_interval = current_interval
 
-    logging.info(f"Completeness: {completeness:.2f}%, Median Interval: {median_interval:.2f} minutes")
-    if interval_changes:
-        logging.warning(f"Detected {len(interval_changes)} interval changes.")
-    if gaps:
-        logging.warning(f"Detected {len(gaps)} significant data gaps.")
-
-    return completeness, gaps, median_interval, interval_changes
+    return completeness, gaps, sampling_interval, interval_changes
 
 def save_metadata(metadata_path, gage, param, service, start, end, completeness, gaps, interval, interval_changes):
     metadata = {
@@ -112,6 +105,22 @@ def save_metadata(metadata_path, gage, param, service, start, end, completeness,
     }
     with open(metadata_path, 'w') as f:
         json.dump(metadata, f, indent=4, default=str)
+
+def save_summary(df, summary_path):
+    start = df['Date & Time'].min().strftime('%Y-%m-%d %H:%M')
+    end = df['Date & Time'].max().strftime('%Y-%m-%d %H:%M')
+    total_records = len(df)
+    ice_records = (df['Discharge (cfs)'] == 'Ice').sum() if 'Discharge (cfs)' in df.columns else 0
+
+    summary = {
+        "Start Date": start,
+        "End Date": end,
+        "Total Records": total_records,
+        "Ice Records": int(ice_records)
+    }
+
+    with open(summary_path, 'w') as f:
+        json.dump(summary, f, indent=4)
 
 def save_data(df, save_path):
     header = [
@@ -138,24 +147,18 @@ def run_downloads():
         raw_path = os.path.join(folder, 'raw', f"{file_name.replace('.csv', '_raw.json')}")
         processed_path = os.path.join(folder, file_name)
         metadata_path = os.path.join(folder, file_name.replace('.csv', '_metadata.json'))
+        summary_path = os.path.join(folder, file_name.replace('.csv', '_summary.json'))
 
-        try:
-            raw_data = download_data(gage_number, param, service, start, end)
-            with open(raw_path, 'w') as f:
-                json.dump(raw_data, f, indent=4)
+        raw_data = download_data(gage_number, param, service, start, end)
+        with open(raw_path, 'w') as f:
+            json.dump(raw_data, f, indent=4)
 
-            df = process_data(raw_data, service, param)
-            completeness, gaps, interval, interval_changes = analyze_data_with_intervals(df, data_type)
+        df = process_data(raw_data, service, param)
+        completeness, gaps, interval, interval_changes = analyze_data_with_intervals(df, data_type)
 
-            save_data(df, processed_path)
-            save_metadata(metadata_path, gage_number, param, service, start, end, completeness, gaps, interval, interval_changes)
-
-            logging.info(f"Successfully saved processed data to {processed_path}")
-            logging.info(f"Metadata saved to {metadata_path}")
-
-        except Exception as e:
-            logging.error(f"Failed to download {param} ({service}) data: {e}")
+        save_data(df, processed_path)
+        save_metadata(metadata_path, gage_number, param, service, start, end, completeness, gaps, interval, interval_changes)
+        save_summary(df, summary_path)
 
 if __name__ == "__main__":
     run_downloads()
-    print(f"Data download completed. See log for details: {log_file}")
